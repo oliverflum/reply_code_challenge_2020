@@ -1,7 +1,24 @@
 import random
 import itertools
+from sqlite3 import connect
 
-in_file = open('e_igloos.txt', 'r')
+# For an in-memory only database:
+db = connect(':memory:')
+db_cursor = db.cursor()
+
+statement = 'CREATE TABLE IF NOT EXISTS employees (eid INTEGER PRIMARY KEY, company TEXT, type INTEGER, bonus INTEGER, skills TEXT)'
+db_cursor.execute(statement)  # Returns None on create table
+
+statement = 'CREATE TABLE IF NOT EXISTS synergies (e1 INTEGER, e2 INTEGER, potential INTEGER, FOREIGN KEY(e1) REFERENCES employees(eid), FOREIGN KEY(e2) REFERENCES employees(eid))'
+db_cursor.execute(statement)  # Returns None on create table
+
+statement = 'CREATE TABLE IF NOT EXISTS seats (sid INTEGER PRIMARY KEY, coord1 INTEGER, coord2 INTEGER, type INTEGER, taken BOOLEAN)'
+db_cursor.execute(statement)  # Returns None on create table
+
+statement = 'CREATE TABLE IF NOT EXISTS seat_map (sid INTEGER, eid INTEGER, FOREIGN KEY(sid) REFERENCES seats(sid), FOREIGN KEY(eid)) REFERENCES employees(eid))'
+db_cursor.execute(statement)  # Returns None on create table
+
+in_file = open('solar.txt', 'r')
 lines = in_file.readlines()
 
 dimensions = [int(lines[0].split(' ')[0]),int(lines[0].split(' ')[1])]
@@ -14,8 +31,6 @@ tables_raw = lines[1:dimensions[1]+1]
 devs_raw = lines[(dev_count_index+1):(dev_count_index+1+no_devs)]
 mans_raw = lines[(man_count_index+1):(man_count_index+1+no_mans)]
 
-devs = []
-
 for dev in devs_raw:
   company = dev.split(' ')[0]
   bonus = int(dev.split(' ')[1])
@@ -24,107 +39,49 @@ for dev in devs_raw:
   for skill in skills:
     skill = skill.strip()
     skill_set.add(skill)
-  devs.append({
-    "skills": skill_set,
-    "company": company,
-    "bonus": bonus
-  })
-
-mans = []
+    statement = 'INSERT INTO employees (company, type, bonus, skills) VALUES (?,?,?,?)'
+    db_cursor.execute(statement, (company, 0, bonus, ';'.join(list(skill_set))))
 
 for man in mans_raw:
   company = man.split(' ')[0]
   bonus = int(man.split(' ')[1])
-  mans.append({
-    "company": company,
-    "bonus": bonus
-  })
-
-seat_plan = []
+  statement = 'INSERT INTO employees (company, type, bonus) VALUES (?,?,?)'
+  db_cursor.execute(statement, (company, 1, bonus))
 
 for i in range(dimensions[1]):
-  seat_plan.append([])
   for j in range(dimensions[0]):
     curr = tables_raw[i][j]
-    if curr == '#': seat_plan[i].append(None)
-    elif curr == 'M': seat_plan[i].append({"type": True, "employee": None})
-    elif curr == '_': seat_plan[i].append({"type": False, "employee": None})
+    if curr == '#': continue
+    elif curr == 'M': 
+      statement = 'INSERT INTO seats (coord1, coord2, type) VALUES (?,?,?)'
+      db_cursor.execute(statement, (i, j, 1))
+    elif curr == '_': 
+      statement = 'INSERT INTO seats (coord1, coord2, type) VALUES (?,?,?)'
+      db_cursor.execute(statement, (i, j, 0))
 
-adjacencies = []
-seat_list = []
+print(db_cursor.execute('SELECT COUNT(*) FROM employees').fetchone()[0])
 
-available_seats = 0
-available_seats_dev = 0
-available_seats_man = 0
-
-for i in range(len(seat_plan)-1):
-  for j in range(len(seat_plan[i])-1):
-    if seat_plan[i][j]==None: 
-      continue
-    seat_list.append(seat_plan[i][j])
-    available_seats += 1
-    if seat_plan[i][j]["type"]:
-      available_seats_man += 1
-    else:
-      available_seats_dev += 1
-    k = i+1
-    l = j
-    if seat_plan[k][l] != None: 
-      adjacencies.append(((i,j),(k,l)))
-    k = i
-    l = j+1
-    if seat_plan[k][l] != None: 
-      adjacencies.append(((i,j),(k,l)))
-
-print("SIZE: ", dimensions)
-
-print("DEV SEATS {}, DEVS {}".format(available_seats_dev, len(devs)))
-print("MAN SEATS {}, MANS {}".format(available_seats_man, len(mans)))
-
-best = []
-max_score = 0
-
-def do(seats):
-  global max_score
-  global best
-  global mans
-  global devs
-  for seat in seat_list:
-    if seat['type']:
-      if not mans:
-        continue
-      seat['employee'] = mans.pop()
-    else:
-      if not devs:
-        continue
-      seat['employee'] = devs.pop()
-
-  score = 0
-
-  for adj in adjacencies:
-    t1, t2 = adj
-    t1i, t1j = t1
-    t2i, t2j = t1
-    e1 = seat_plan[t1i][t1j]
-    e2 = seat_plan[t2i][t2j]
-    if e1["employee"] is None or e2["employee"] is None or e1 is None or e2 is None:
-      print(e1,e2)
-      return
-
-    if e1["employee"]["company"] == e1["employee"]["company"]:
-      score += e1["employee"]["bonus"]*e2["employee"]["bonus"]
-    if not e1["type"] and not e2["type"]:
-      score += len(e1["employee"]["skills"].intersection(e2["employee"]["skills"]))*len(e1["employee"]["skills"].union(e2["employee"]["skills"]))
-
-  if score > max_score:
-    print(score)
-    best = seat_plan
-    max_score = score
-
-seat_perms = itertools.permutations(seat_list)
-print()
-for seat_p in seat_perms:
-  do(seat_p)
-
-print(seat_plan)
-print("SCORE: ", max_score)
+rows = db_cursor.execute('SELECT * FROM employees e1 LEFT JOIN employees e2 WHERE e1.eid < e2.eid').fetchall()
+print(len(rows))
+for row in rows:
+    e1 = {
+      "id": row[0],
+      "company": row[1],
+      "type": row[2],
+      "bonus": row[3],
+      "skills": set(';'.split(row[4]))
+    }
+    e2 = {
+      "id": row[0+5],
+      "company": row[1+5],
+      "type": row[2+5],
+      "bonus": row[3+5],
+      "skills": set(';'.split(row[4+5]))
+    }
+    score = 0
+    if e1["company"] == e2["company"]:
+      score += e1["bonus"]*e2["bonus"]
+    if e1["type"] == 0 and e2["type"] == 0:
+      score += len(e1["skills"].intersection(e2["skills"]))*len(e1["skills"].union(e2["skills"]))
+    statement = 'INSERT INTO synergies (e1, e2, potential) VALUES (?,?,?)'
+    db_cursor.execute(statement, (e1["id"], e2["id"], score))
